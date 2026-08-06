@@ -11,7 +11,6 @@ const IG_USER_ID = process.env.IG_USER_ID!;
 const IG_ACCESS_TOKEN = process.env.IG_ACCESS_TOKEN!;
 const DEFAULT_CAPTION = process.env.DEFAULT_CAPTION || 'Check out our latest Reel! 🔥';
 
-// Use Render's persistent disk directory if running live, otherwise local folder
 // Use simple local file path so GitHub Actions can save and commit it
 const POSTED_LOG_FILE = path.join(__dirname, 'posted_reels.json');
 
@@ -30,7 +29,7 @@ function savePostedId(id: string) {
     fs.writeFileSync(POSTED_LOG_FILE, JSON.stringify(posted, null, 2));
 }
 
-// Initialize Google Drive API (Supports Base64 for Render or local JSON file for testing)
+// Initialize Google Drive API (Supports Base64 for GitHub Actions or local JSON file for testing)
 let auth;
 if (process.env.GOOGLE_SERVICE_ACCOUNT_BASE64) {
     const decodedCreds = JSON.parse(
@@ -50,10 +49,24 @@ const drive = google.drive({ version: 'v3', auth });
 
 async function runAutomation() {
     try {
-        console.log("Checking shared Drive folder for Reels...");
+        console.log("Checking shared Drive folder and its subfolders for Reels...");
         
+        // 1. Find all subfolders inside the main folder
+        const foldersRes = await drive.files.list({
+            q: `'${DRIVE_FOLDER_ID}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+            fields: 'files(id, name)',
+        });
+
+        const subfolderIds = (foldersRes.data.files || []).map(f => f.id).filter(Boolean) as string[];
+        const allFolderIds = [DRIVE_FOLDER_ID, ...subfolderIds];
+
+        // 2. Build a query that checks the main folder AND all subfolders at once
+        const parentQueries = allFolderIds.map(id => `'${id}' in parents`).join(' or ');
+        const query = `(${parentQueries}) and mimeType contains 'video/' and trashed = false`;
+
+        // 3. Fetch all videos from all discovered folders
         const response = await drive.files.list({
-            q: `'${DRIVE_FOLDER_ID}' in parents and mimeType contains 'video/' and trashed = false`,
+            q: query,
             orderBy: 'createdTime asc',
             pageSize: 100, 
             fields: 'files(id, name)',
@@ -117,16 +130,5 @@ async function runAutomation() {
     }
 }
 
-// Continuous 2-Hour Loop for Background Worker
-async function startWorker() {
-    console.log("Instagram Automation Worker Started.");
-    const INTERVAL_MS = 2 * 60 * 60 * 1000; // 2 hours
-
-    while (true) {
-        await runAutomation();
-        console.log("Waiting 2 hours until the next check...");
-        await new Promise(resolve => setTimeout(resolve, INTERVAL_MS));
-    }
-}
-
+// Run the automation once when triggered
 runAutomation();
