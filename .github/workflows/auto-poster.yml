@@ -2,7 +2,7 @@ name: Instagram Reels Automation
 
 on:
   schedule:
-    - cron: '0 * * * *' # Runs every hour
+    - cron: '0 * * * *' # Runs every 1 hour to compensate for GitHub queue delays
   workflow_dispatch:
 
 permissions:
